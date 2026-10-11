@@ -1,0 +1,399 @@
+import sys
+from pathlib import Path
+
+# Ensure we can import from the project root regardless of where this script is called from
+# This dynamically finds the project root by looking for key directories
+SCRIPT_DIR = Path(__file__).resolve()
+PROJECT_ROOT = SCRIPT_DIR.parent.parent  # Goes up from infrastructure/scripts to project root
+
+# Add project root to Python path so we can import app_config and other modules
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from app_config.config import Config
+
+_Config = Config()  # Initialize config to load .env and validate
+
+def check_dependencies():
+    """Ensures all required Python packages are installed."""
+    print("📦 Checking Python Dependencies...")
+    # Map PyPI package names to their actual import/module names
+    required = [
+        ("redis", "redis"), 
+        ("pika", "pika"), 
+        ("qdrant-client", "qdrant_client"), 
+        ("celery", "celery"), 
+        ("pyyaml", "yaml"),  # PyYAML installs as 'yaml' module
+        ("google-api-python-client", "googleapiclient"),  # Installs as 'googleapiclient'
+        ("youtube-transcript-api", "youtube_transcript_api")  # Installs with underscores
+    ]
+    
+    missing = []
+    for pkg_name, import_name in required:
+        try:
+            __import__(import_name)
+        except ImportError:
+            missing.append(pkg_name)
+
+    if missing:
+        print(f"❌ Missing packages: {', '.join(missing)}")
+        print("💡 Run: pip install -r requirements.txt")
+        return False
+    
+    print("✅ All dependencies installed.")
+    return True
+
+def check_redis():
+    """Connects to Redis using Config settings."""
+    print("\n🔴 Checking Redis...")
+    try:
+        
+        
+        # Use Config to get URL (handles .env fallback)
+        redis_url = _Config.get_redis_url()
+        
+        import redis
+        r = redis.Redis.from_url(redis_url, decode_responses=True)
+        
+        if r.ping():
+            print(f"✅ Redis is UP ({redis_url}).")
+            
+            # Test write/read for job status logic
+            test_key = "ortho_rag_validate_test"
+            r.set(test_key, "success", ex=60) # Set with 60s expiry
+            val = r.get(test_key)
+            
+            if val == "success":
+                print("✅ Redis Read/Write verified.")
+                
+                # Check Redis CLI accessibility (Redis doesn't have a web UI by default)
+                # But we can verify the connection is working properly
+                return True
+            else:
+                print(f"⚠️ Redis Write test failed (got: {val}).")
+                return False
+        else:
+            print("❌ Redis ping failed.")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Redis connection error: {e}")
+        # Print the URL used for debugging
+        try:
+
+            print(f"   (Attempted URL: {_Config.get_redis_url()})")
+        except: pass
+        return False
+
+def check_rabbitmq():
+    """Connects to RabbitMQ using Config settings."""
+    print("\n🐇 Checking RabbitMQ...")
+    try:
+        #from src.config import Config
+        
+        # Use Config to get URL
+        rmq_url = _Config.get_rabbitmq_url()
+        
+        import pika
+        # Parse URL for credentials (simple parsing for validation)
+        # In production, use a library like urllib.parse or amqp.connection
+        # For this script, we rely on the standard connection params derived from env
+        
+        host = _Config.RABBITMQ_HOST
+        port = _Config.RABBITMQ_PORT
+        user = _Config.RABBITMQ_USER
+        password = _Config.RABBITMQ_PASSWORD
+        
+        credentials = pika.PlainCredentials(user, password)
+        parameters = pika.ConnectionParameters(host=host, port=port, credentials=credentials)
+        
+        connection = pika.BlockingConnection(parameters)
+        channel = connection.channel()
+        
+        print(f"✅ RabbitMQ Connection established ({rmq_url}).")
+        
+        # Check management UI accessibility via browser
+        if host == "localhost":
+            import urllib.request
+            try:
+                # Try to access the management UI login page (returns 200 or 302)
+                req = urllib.request.urlopen('http://localhost:15672/', timeout=3)
+                if req.status in [200, 302]:  # 302 means redirect to login
+                    print("✅ RabbitMQ Management UI is accessible via browser.")
+                else:
+                    print(f"⚠️ Management UI returned unexpected status: {req.status}")
+            except Exception as ui_err:
+                print(f"❌ Management UI is NOT accessible via browser: {ui_err}")
+                connection.close()
+                return False  # Return false if UI is not accessible
+        else:
+            print("⚠️ Skipping Management UI check (non-localhost instance)")
+
+        connection.close()
+        return True
+        
+    except Exception as e:
+        print(f"❌ RabbitMQ connection error: {e}")
+        try:
+           # from src.config import Config
+            print(f"   (Attempted URL: {_Config.get_rabbitmq_url()})")
+        except: pass
+        return False
+
+def check_qdrant():
+    """Connects to Qdrant using Config settings."""
+    print("\n🧠 Checking Qdrant...")
+    try:
+       # from src.config import Config
+        
+        qdrant_config = Config.get_qdrant_client_config()
+        
+        from qdrant_client import QdrantClient
+        from qdrant_client.http.exceptions import UnexpectedResponse
+        
+        client = QdrantClient(**qdrant_config, timeout=3.0)
+        
+        # Check if server is alive using get_collections (simple connectivity test)
+        # Note: QdrantClient doesn't have a get_health() method
+        # We use get_collections or get_cluster_info as a connectivity check
+        collections = client.get_collections()
+        
+        print(f"✅ Qdrant Server is UP (Host: {Config.QDRANT_HOST}:{Config.QDRANT_PORT}).")
+        print(f"   Found {len(collections.collections) if collections.collections else 0} collection(s).")
+        
+        # Check web UI accessibility via browser
+        import urllib.request
+        try:
+            qdrant_web_url = f"http://{Config.QDRANT_HOST}:{Config.QDRANT_PORT}"
+            req = urllib.request.urlopen(qdrant_web_url, timeout=3)
+            if req.status == 200:
+                print(f"✅ Qdrant Web UI is accessible via browser.")
+            else:
+                print(f"⚠️ Qdrant returned status {req.status} (expected 200)")
+        except Exception as web_err:
+            print(f"❌ Qdrant Web UI is NOT accessible via browser: {web_err}")
+            return False  # Return false if web UI is not accessible
+        
+        # Try to create a test collection (idempotent)
+        try:
+            from qdrant_client.http import models as rest
+            
+            client.create_collection(
+                collection_name="ortho_rag_test",
+                vectors_config=rest.VectorParams(size=1536, distance=rest.Distance.COSINE)
+            )
+            print("✅ Qdrant Collection creation verified.")
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "already exists" in error_msg or "conflict" in error_msg:
+                print("✅ Qdrant Test collection already exists (Good!).")
+            else:
+                raise e
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Qdrant connection error: {e}")
+        try:
+            #from src.config import Config
+            cfg = _Config.get_qdrant_client_config()
+            print(f"   (Attempted Host: {cfg['host']}, Port: {cfg['port']})")
+        except: pass
+        return False
+
+def check_seeds_file():
+    """Validates that the seeds.yaml file exists and is readable."""
+    print("\n📜 Checking Seeds Configuration...")
+    try:
+        #from src.config import Config
+        
+        # This will raise FileNotFoundError if missing
+        config_data = _Config.get_seeds_config
+        
+        total_seeds = len(_Config.get_flattened_seeds())
+        print(f"✅ seeds.yaml loaded successfully.")
+        print(f"   Found {total_seeds} search keywords across categories.")
+        return True
+        
+    except FileNotFoundError as e:
+        print(f"❌ seeds.yaml not found. Ensure it exists at config/seeds.yaml")
+        return False
+    except Exception as e:
+        print(f"❌ Error loading seeds configuration: {e}")
+        return False
+
+def check_fastapi_container():
+    """Validates FastAPI container is running and responding."""
+    print("\n🚀 Checking FastAPI Container...")
+    
+    # Check if docker-compose is available
+    try:
+        import subprocess
+        
+        # First, check if containers are running
+        result = subprocess.run(
+            ["docker", "ps", "--filter", "name=ortho_api", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if not result.stdout.strip():
+            print("❌ FastAPI container is NOT running.")
+            print("💡 Run: make up")
+            return False
+        
+    except FileNotFoundError:
+        print("⚠️ Docker command not found. Skipping container check.")
+        print("   Please ensure Docker is installed and running.")
+        return False
+    except Exception as e:
+        print(f"❌ Error checking Docker containers: {e}")
+        return False
+    
+    # Check if API is responding via HTTP - STRICT MODE
+    try:
+        import urllib.request
+        
+        # Try to reach the health endpoint or root
+        api_url = "http://localhost:8000/health"
+        
+        # Create request with redirect following enabled (default behavior)
+        req = urllib.request.Request(api_url)
+        response = urllib.request.urlopen(req, timeout=5)
+        
+        if response.status == 200:
+            print(f"✅ FastAPI container is UP and responding ({api_url}).")
+            
+            # Try to get response data for additional validation
+            try:
+                import json
+                response_data = json.loads(response.read().decode())
+                print(f"   Health status: {response_data.get('status', 'unknown')}")
+                return True
+            except (json.JSONDecodeError, AttributeError):
+                # If not JSON, still consider it successful if 200 OK
+                print("   API responded successfully.")
+                return True
+                
+    except urllib.error.URLError as e:
+        print(f"❌ FastAPI health check failed: {e}")
+        print("💡 Ensure the container has finished starting (may take a few seconds).")
+        print("💡 Run: make logs to view container logs.")
+        return False  # NOW RETURNS FALSE ON FAILURE
+    except Exception as e:
+        print(f"❌ FastAPI health endpoint not accessible: {e}")
+        print("💡 Container may be running but API is not responding properly.")
+        return False  # NOW RETURNS FALSE ON FAILURE
+
+def check_streamlit_ui():
+    """Validates Streamlit UI container is running and responding."""
+    print("\n🎨 Checking Streamlit UI Container...")
+    
+    # Check if docker-compose is available
+    try:
+        import subprocess
+        
+        # First, check if containers are running
+        result = subprocess.run(
+            ["docker", "ps", "--filter", "name=ortho_app_ui", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if not result.stdout.strip():
+            print("❌ Streamlit UI container is NOT running.")
+            print("💡 Run: make ui-up")
+            return False
+        
+    except FileNotFoundError:
+        print("⚠️ Docker command not found. Skipping container check.")
+        print("   Please ensure Docker is installed and running.")
+        return False
+    except Exception as e:
+        print(f"❌ Error checking Docker containers: {e}")
+        return False
+    
+    # Check if UI is responding via HTTP
+    try:
+        import urllib.request
+        
+        # Try to reach the Streamlit UI (returns HTML, not JSON)
+        ui_url = "http://localhost:8501"
+        
+        req = urllib.request.Request(ui_url)
+        response = urllib.request.urlopen(req, timeout=5)
+        
+        if response.status == 200:
+            print(f"✅ Streamlit UI container is UP and responding ({ui_url}).")
+            
+            # Check if we got HTML content (Streamlit returns HTML)
+            content_type = response.headers.get('Content-Type', '')
+            if 'text/html' in content_type.lower():
+                print("   ✅ UI is serving HTML content as expected.")
+                return True
+            else:
+                print(f"   ⚠️ Unexpected content type: {content_type}")
+                return True  # Still consider it success if 200 OK
+                
+    except urllib.error.URLError as e:
+        print(f"❌ Streamlit UI health check failed: {e}")
+        print("💡 Ensure the container has finished starting (may take a few seconds).")
+        print("💡 Run: make ui-logs to view container logs.")
+        return False
+    except Exception as e:
+        print(f"❌ Streamlit UI not accessible: {e}")
+        print("💡 Container may be running but UI is not responding properly.")
+        return False
+
+def main():
+    print("="*60)
+    print("🚀 Ortho RAG Platform Infrastructure Validator")
+    print("="*60)
+
+    # 1. Check Python Dependencies
+    if not check_dependencies():
+        sys.exit(1)
+
+    # 2. Check Config & Seeds (Critical for app logic)
+    seeds_ok = check_seeds_file()
+
+    # 3. Check Services
+    results = {
+        "Redis": check_redis(),
+        "RabbitMQ": check_rabbitmq(),
+        "Qdrant": check_qdrant(),
+        "FastAPI Container": check_fastapi_container(),
+        "Streamlit UI": check_streamlit_ui()
+    }
+
+    print("\n" + "="*60)
+    print("📊 Validation Summary")
+    print("="*60)
+    
+    all_passed = seeds_ok and all(results.values())
+    
+    for service, status in results.items():
+        symbol = "✅ PASS" if status else "❌ FAIL"
+        print(f"{service}: {symbol}")
+        
+    print(f"Seeds Config: {'✅ PASS' if seeds_ok else '❌ FAIL'}")
+
+    print("-"*60)
+    if all_passed:
+        print("🎉 SUCCESS! All infrastructure components are ready.")
+        print("\n📍 Service URLs (Browser Accessible):")
+        print(f"   🐇 RabbitMQ UI:  http://{_Config.RABBITMQ_HOST}:15672")
+        print(f"   🧠 Qdrant UI:    http://{_Config.QDRANT_HOST}:{_Config.QDRANT_PORT}")
+        print(f"   🎨 Streamlit UI: http://localhost:8501")
+        print(f"\n📌 Other Services:")
+        print(f"   🔴 Redis:        {_Config.get_redis_url()} (CLI/Programmatic only)")
+        print(f"   🚀 FastAPI:      http://localhost:8000")
+        print(f"\n💡 You can now run: python src/main.py")
+    else:
+        print("⚠️  WARNING: Some services or configs failed. Check logs above.")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

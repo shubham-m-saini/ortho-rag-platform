@@ -1,28 +1,112 @@
-version: '3.8'
-
 services:
+  # --- Redis Service ---
   redis:
-    image: redis:alpine
+    image: redis:7-alpine
+    container_name: ortho_redis
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
-    networks:
-      - ortho-net
+      # Bind mount to local project directory for persistence
+      - .local_data/redis:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
-  vector-db:
-    image: chromadb/chroma:latest
+  # --- RabbitMQ Service (with Management UI) ---
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: ortho_rabbitmq
+    ports:
+      - "5672:5672"   # AMQP Protocol Port
+      - "15672:15672" # Management UI Port (Web Interface)
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      # Bind mount to local project directory for persistence
+      - .local_data/rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- Qdrant Service ---
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: ortho_qdrant
+    ports:
+      - "6333:6333"   # HTTP API
+      - "6334:6334"   # gRPC (Optional but recommended for performance)
+    volumes:
+      # Bind mount to local project directory for persistence
+      - .local_data/qdrant:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- FastAPI Application (Modular Monolith) ---
+  ortho_api:
+    build: .
+    container_name: ortho_api
     ports:
       - "8000:8000"
     volumes:
-      - chroma_data:/chroma/chroma
-    networks:
-      - ortho-net
+      # Mount the API Gateway code for hot-reload
+      - ./api_gateway:/app/api_gateway
+      # Mount all services for hot-reload (crucial for modular monolith)
+      - ./services:/app/services
+      # Mount requirements to ensure local changes are picked up immediately
+      - ./requirements.txt:/app/requirements.txt
+    environment:
+      # Internal Docker Hostnames (Services talk to each other via these names)
+      - REDIS_HOST=redis
+      - RABBITMQ_HOST=rabbitmq
+      - QDRANT_HOST=qdrant
+      
+      # External Config passed from host .env file
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
+      
+      # Ensure Python can find the services folder inside the container
+      - PYTHONPATH=/app:/app/services
 
-volumes:
-  redis_data:
-  chroma_data:
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    
+    # Run the orchestrator (FastAPI) with hot-reload enabled
+    command: uvicorn api_gateway.main:app --host 0.0.0.0 --port 8000 --reload
 
-networks:
-  ortho-net:
-    driver: bridge
+  # --- Streamlit UI Application ---
+  app_ui:
+    build:
+      context: .
+      dockerfile: app_ui/Dockerfile
+    container_name: ortho_app_ui
+    ports:
+      - "8501:8501"
+    volumes:
+      # Mount the UI code for hot-reload
+      - ./app_ui:/app
+    environment:
+      # API Gateway URL (for future integration)
+      - API_URL=http://ortho_api:8000
+      
+    depends_on:
+      - ortho_api
+    
+    # Run Streamlit app
+    command: streamlit run app.py --server.port=8501 --server.address=0.0.0.0
+
+# Note: Named volumes section removed as we are using bind mounts (.local_data/)

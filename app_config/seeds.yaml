@@ -1,0 +1,107 @@
+# config/seeds.yaml
+# Exhaustive Orthopedic Surgery Seed List for RAG Corpus Generation
+# Usage: Load via PyYAML in Python script to drive YouTube API searches
+
+orthopedic_seeds:
+  # Category 1: Trauma & Fracture Fixation (Plates, Screws, Nails)
+  trauma:
+    - "locking plate fixation technique orthopedic"
+    - "distal femur locking plate ORIF surgery"
+    - "proximal humerus fracture open reduction internal fixation"
+    - "tibial plateau fracture plating technique"
+    - "intramedullary nail insertion femur step by step"
+    - "tibia intramedullary nailing reaming vs non-reaming"
+    - "fibular fracture plate fixation surgery"
+    - "distal radius volar locking plate application"
+    - "scaphoid fracture screw fixation technique"
+    - "calcaneus fracture open reduction internal fixation"
+    - "mandible fracture plating orthopedic maxillofacial"
+    - "pelvic ring fracture external fixator application"
+    - "acetabular fracture surgical approach and fixation"
+    - "spinal pedicle screw insertion technique"
+    - "vertebral body cage placement spinal fusion"
+    - "iliac crest bone graft harvesting technique"
+    - "external fixator conversion to internal fixation"
+    - "minimally invasive plate osteosynthesis MIPO technique"
+    - "locking compression plate LCP application guide"
+    - "dynamic hip screw DHS insertion video"
+
+  # Category 2: Joint Arthroplasty (Hip, Knee, Shoulder Prostheses)
+  arthroplasty:
+    - "total hip arthroplasty cementless technique"
+    - "total hip replacement acetabular cup preparation"
+    - "femoral stem insertion total hip arthroplasty"
+    - "posterior approach total knee arthroplasty surgery"
+    - "medial parapatellar approach total knee replacement"
+    - "knee prosthesis alignment and balancing technique"
+    - "revision total knee arthroplasty bone grafting"
+    - "total shoulder arthroplasty humeral head preparation"
+    - "reverse total shoulder arthroplasty glenoid baseplate fixation"
+    - "anatomic total elbow replacement surgery"
+    - "ankle arthroplasty mobile bearing implant insertion"
+    - "hip resurfacing arthroplasty technique"
+    - "uncemented hip stem press fit technique"
+    - "cemented knee prosthesis cementing technique vacuum mixing"
+    - "dual mobility cup total hip replacement benefits"
+
+  # Category 3: Spine Surgery (Fusion, Fixation, Disc)
+  spine:
+    - "posterior lumbar interbody fusion PLIF technique"
+    - "transforaminal lumbar interbody fusion TLIF surgery"
+    - "anterior cervical discectomy and fusion ACDF plate fixation"
+    - "cervical disc replacement artificial disc implantation"
+    - "pedicle screw trajectory navigation spine surgery"
+    - "vertebroplasty kyphoplasty cement injection technique"
+    - "spinal deformity correction osteotomy technique"
+    - "lateral lumbar interbody fusion LLIF approach"
+    - "posterior spinal instrumentation and fusion adolescent idiopathic scoliosis"
+    - "cervical laminectomy and fusion C-spine surgery"
+
+  # Category 4: Sports Medicine & Arthroscopy (Anchors, Screws)
+  sports_medicine:
+    - "ACL reconstruction interference screw fixation technique"
+    - "rotator cuff repair suture anchor insertion arthroscopic"
+    - "meniscus repair all inside device technique"
+    - "labral repair glenoid suture anchor placement shoulder"
+    - "ankle ligament reconstruction Broström-Gould technique"
+    - "hamstring tendon harvest ACL graft fixation"
+    - "patellar tendon rupture repair technique"
+    - "elbow ulnar nerve transposition surgery"
+
+  # Category 5: Specific Implant Systems & Manufacturers (High Value)
+  manufacturers:
+    - "Synthes LCP locking plate system application"
+    - "Zimmer Biomet Acetabular Cup cementless technique"
+    - "Stryker Mako robotic arm assisted hip surgery"
+    - "Smith & Nephew Triathlon knee implant insertion"
+    - "DePuy Synthes Hip Resurfacing procedure"
+    - "Medtronic Spine vertebral body tethering system"
+    - "Arthrex ACL reconstruction technique video"
+    - "Biomet Mako total knee arthroplasty navigation"
+    - "Wright Medical ConforMIS custom knee implant surgery"
+    - "J&J DePuy Pinnacle hip stem insertion"
+
+  # Category 6: Complications & Revision Surgery (Critical Context)
+  complications:
+    - "periprosthetic fracture fixation around knee implant"
+    - "loose hip prosthesis revision surgery technique"
+    - "nonunion femur fracture treatment options"
+    - "infected total joint arthroplasty debridement and exchange"
+    - "hardware failure removal orthopedic surgery"
+    - "malunion correction osteotomy technique"
+    - "nerve injury repair during orthopedic surgery"
+
+# Runner Configuration for MVP Quota Management
+runner_config:
+  # Max searches per day (Free Tier Limit: ~100 searches/day = 10,000 units)
+  # Recommended safe limit to allow room for errors and pagination: 25-30
+  daily_search_limit: 25
+  
+  # Max results returned per search request (YouTube API max is 50)
+  max_results_per_request: 50
+  
+  # Filter settings for the script
+  filters:
+    min_duration_seconds: 300   # 5 minutes minimum to ensure surgical depth
+    max_duration_seconds: 2700  # 45 minutes maximum to avoid long conferences
+    language_code: "en"         # English only
